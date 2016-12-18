@@ -5996,6 +5996,9 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		kvm_pv_kick_cpu_op(vcpu->kvm, a0, a1);
 		ret = 0;
 		break;
+	case KVM_HC_COUSTOM:
+		printk("KVM: Coustom Hypercall was called\n");
+		break;
 	default:
 		ret = -KVM_ENOSYS;
 		break;
