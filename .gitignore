@@ -3,7 +3,12 @@
 *.ko
 *.obj
 *.elf
-
+#hidden files
+.*
+*.mod.c
+*.order
+*.diff
+		
 # Precompiled Headers
 *.gch
 *.pch
@@ -31,3 +36,4 @@
 # Debug files
 *.dSYM/
 *.su
+
