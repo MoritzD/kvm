@@ -7,6 +7,9 @@
 
 #define MSR_IA32_CR_PAT_DEFAULT  0x0007040600070406ULL
 
+extern gpa_t toHideGpa;
+extern unsigned long replacePage;
+
 static inline void kvm_clear_exception_queue(struct kvm_vcpu *vcpu)
 {
 	vcpu->arch.exception.pending = false;

@@ -447,7 +447,11 @@ error:
 	}
 #endif
 	walker->fault.address = addr;
-	walker->fault.nested_page_fault = mmu != vcpu->arch.walk_mmu;
+	walker->fault.nested_page_fault
+
+
+
+	 = mmu != vcpu->arch.walk_mmu;
 
 	trace_kvm_mmu_walker_error(walker->fault.error_code);
 	return 0;
@@ -693,6 +697,7 @@ FNAME(is_self_change_mapping)(struct kvm_vcpu *vcpu,
 	return self_changed;
 }
 
+
 /*
  * Page fault handler.  There are several causes for a page fault:
  *   - there is no shadow pte for the guest pte
@@ -720,7 +725,7 @@ static int FNAME(page_fault)(struct kvm_vcpu *vcpu, gva_t addr, u32 error_code,
 	unsigned long mmu_seq;
 	bool map_writable, is_self_change_mapping;
 
-	pgprintk("%s: addr %lx err %x\n", __func__, addr, error_code);
+	printk("%s: addr %lx err %x\n", __func__, addr, error_code);
 
 	r = mmu_topup_memory_caches(vcpu);
 	if (r)
@@ -735,7 +740,16 @@ static int FNAME(page_fault)(struct kvm_vcpu *vcpu, gva_t addr, u32 error_code,
 	/*
 	 * Look up the guest pte for the faulting address.
 	 */
+
 	r = FNAME(walk_addr)(&walker, vcpu, addr, error_code);
+
+	if(toHideGpa) {	
+		if(list_epts(vcpu, addr)) {
+			printk("%s: guest page fault on our page\n", __func__);
+			inject_page_fault(vcpu, &walker.fault);
+		 	return 0;
+		 }
+	}
 
 	/*
 	 * The page is not mapped by the guest.  Let the guest handle it.

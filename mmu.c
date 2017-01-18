@@ -51,7 +51,13 @@
  * 2. while doing 1. it walks guest-physical to host-physical
  * If the hardware supports that we don't need to do shadow paging.
  */
-bool tdp_enabled = false;
+bool tdp_enabled = true;
+
+u64 targetAddr = 0;
+u64* targetSpte = 0;
+u64 new4kPageTable = 0;
+
+
 
 enum {
 	AUDIT_PRE_PAGE_FAULT,
@@ -4074,6 +4080,11 @@ static void paging32E_init_context(struct kvm_vcpu *vcpu,
 
 static void init_kvm_tdp_mmu(struct kvm_vcpu *vcpu)
 {
+	printk("%s in init mmu\n", __func__);
+	targetAddr = 0;
+	targetSpte = 0;
+	new4kPageTable = 0;
+
 	struct kvm_mmu *context = &vcpu->arch.mmu;
 
 	context->base_role.word = 0;
@@ -4507,13 +4518,70 @@ static void make_mmu_pages_available(struct kvm_vcpu *vcpu)
 	}
 	kvm_mmu_commit_zap_page(vcpu->kvm, &invalid_list);
 }
-
-int kvm_mmu_page_fault(struct kvm_vcpu *vcpu, gva_t cr2, u32 error_code,
+u64 replaceSpte = 0;
+int kvm_mmu_page_fault(struct kvm_vcpu *vcpu, gva_t cr2, u32 error_code,	// why the hell is this a GVA? it is called with a GPA in vmx.c
 		       void *insn, int insn_len)
 {
 	int r, emulation_type = EMULTYPE_RETRY;
 	enum emulation_result er;
 	bool direct = vcpu->arch.mmu.direct_map || mmu_is_nested(vcpu);
+
+	printk("%s: addr %lx err %x\n", __func__, cr2, error_code);
+	if(toHideGpa) {
+		if(list_epts(vcpu, cr2)){
+			printk("%s: our page found with list epts\n",__func__);
+			// if(*targetSpte & 0x0000000000000001) {
+			// 	printk("%s: found our page as readable stoping VM\n",__func__);
+			// 	return -1;
+			// }
+			// unsigned long temp = 0;
+	
+
+			
+			if(!replaceSpte){
+				replaceSpte = *targetSpte;
+				u64 mask = (((1ull << 53) -1) & ~((1ull << 12 ) - 1));
+				printk("%s: mask for replacement is: %llx; old spte: %llx\n", __func__, mask, *targetSpte);
+				*targetSpte = (*targetSpte & ~mask) | (replacePage & mask);
+				*targetSpte = (*targetSpte | 3) & ~4;
+				printk("%s: replacing ept with: %llx; replacePage was: %llx, new replacePage is: %llx\n",__func__, *targetSpte, replacePage, replaceSpte);
+			} else {
+				u64 temp = *targetSpte;
+				*targetSpte = replaceSpte;
+				replaceSpte = temp;
+				printk("%s: Swaped epts: old %llx replaced by: %llx\n", __func__, temp, *targetSpte);
+			}
+
+			// u64 newSpte = *targetSpte;
+			// temp = (*targetSpte >> 21) & 0x3FFFFFFF;
+			// newSpte &= 0xFFFD0000000FFFFF;
+			// newSpte |= (replacePage << 21);
+			// newSpte &= 0xFFFFFFFFFFFFFFF8;
+			// newSpte |= ~(*targetSpte & 0x0000000000000007);  // maybe add some more error checking here...
+
+
+			// spin_lock(&vcpu->kvm->mmu_lock);
+	        // if(mmu_spte_update(targetSpte, newSpte))
+	        // 	printk("need to flush tlb\n");
+        	// spin_unlock(&vcpu->kvm->mmu_lock);
+        	kvm_flush_remote_tlbs(vcpu->kvm);
+        	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+        	return 1; // retry instruction
+
+		}
+		if(toHideGpa == (cr2 & 0xFFF00000)) {
+			printk("%s: our page\n",__func__);
+			error_code &= 0xFFFFFFFE;
+			struct kvm_shadow_walk_iterator iterator;
+			for_each_shadow_entry(vcpu, cr2 , iterator) {
+        		// sptes = *iterator.sptep;
+                // sptep = iterator.sptep;
+                // level = iterator.level;
+                printk("%s: found level: %d spte: %llx targetSpte: %llx\n",__func__,iterator.level, *iterator.sptep,targetSpte);
+        }
+			return -1;
+		}
+	}
 
 	if (unlikely(error_code & PFERR_RSVD_MASK)) {
 		r = handle_mmio_page_fault(vcpu, cr2, direct);
@@ -4526,10 +4594,36 @@ int kvm_mmu_page_fault(struct kvm_vcpu *vcpu, gva_t cr2, u32 error_code,
 		if (r < 0)
 			return r;
 	}
+	// if( cr2 == targetAddr) {
+	// 	printk("KVM guest pagefault at target GVA: %llx\n",cr2);
+	// }
+	// if(toHideGpa) {
+	// 	// printk(KERN_INFO "%s: page fault at: GPA: %llx; toHideGpa: %llx\n",__func__, cr2, toHideGpa);
+	// 	if(list_epts(vcpu, cr2)) {
+	// 		return 1;
+	// 	}
 
+	// }
+	// if(targetSpte) {
+
+	// 	if(list_epts(vcpu, cr2)) {
+	// 		struct x86_exception fault;
+
+	// 		fault.vector = PF_VECTOR;
+	// 		fault.error_code_valid = true;
+	// 		fault.error_code = error_code;
+	// 		fault.address = cr2;
+	// 		fault.nested_page_fault = &vcpu->arch.mmu != vcpu->arch.walk_mmu;
+	// 		printk("%s: guest page fault on our page\n", __func__);
+	// 		inject_page_fault(vcpu, &fault);
+	// 	 	return 1;
+	// 	 }
+	// }
+	//printk("%s: vcpu->arch.mmu.page_fault() is %p\n", vcpu->arch.mmu.page_fault );
 	r = vcpu->arch.mmu.page_fault(vcpu, cr2, error_code, false);
-	if (r < 0)
+	if (r < 0){
 		return r;
+	}
 	if (!r)
 		return 1;
 
@@ -4608,8 +4702,8 @@ int kvm_mmu_create(struct kvm_vcpu *vcpu)
 	vcpu->arch.nested_mmu.translate_gpa = translate_nested_gpa;
 
 	return alloc_mmu_pages(vcpu);
-}
 
+}
 void kvm_mmu_setup(struct kvm_vcpu *vcpu)
 {
 	MMU_WARN_ON(VALID_PAGE(vcpu->arch.mmu.root_hpa));
@@ -5108,4 +5202,137 @@ void kvm_mmu_module_exit(void)
 	percpu_counter_destroy(&kvm_total_used_mmu_pages);
 	unregister_shrinker(&mmu_shrinker);
 	mmu_audit_disable();
+}
+u64* hl_kvm_mmu_update_spte(struct kvm_vcpu *vcpu, u64 addr, u64 mask)
+{
+        struct kvm_shadow_walk_iterator iterator;
+        int nr_sptes = 0;
+        u64 sptes;
+        u64* sptep;
+        int level;
+        u64 localMask = 0xFFFFFFFFFFFFFFF8;   /// 1000
+        targetAddr = addr;
+		printk("%s: in hl_kvm_mmu_update_spte\n",__func__);
+        spin_lock(&vcpu->kvm->mmu_lock);
+        for_each_shadow_entry(vcpu, addr, iterator) {
+        		sptes = *iterator.sptep;
+                sptep = iterator.sptep;
+                level = iterator.level;
+                printk("%s: found iterator level: %d spte: %llx\n",__func__,iterator.level, *iterator.sptep);
+                nr_sptes++;
+                if (!is_shadow_present_pte(*iterator.sptep)){
+                printk("%s: found final iterator level: %d; break \n",__func__,iterator.level);
+                        break;
+                }
+        }
+        if(level == 2){
+        	printk("%s: trying to remap to 4k pages\n",__func__);
+        	u64 new4kPageTable = __get_free_page(GFP_KERNEL);
+        	remap_to4k(new4kPageTable, sptes >> 12);
+        	*sptep = virt_to_phys(new4kPageTable) | 0x7;
+
+        	kvm_flush_remote_tlbs(vcpu->kvm);
+        	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+        	for_each_shadow_entry(vcpu, addr, iterator) {
+        		sptes = *iterator.sptep;
+                sptep = iterator.sptep;
+                level = iterator.level;
+                printk("%s: found iterator level: %d spte: %llx\n",__func__,iterator.level, *iterator.sptep);
+                nr_sptes++;
+                if (!is_shadow_present_pte(*iterator.sptep)){
+                printk("%s: found final iterator level: %d; break \n",__func__,iterator.level);
+                        break;
+                }
+        }
+        }
+        sptes = sptes & localMask;
+        sptes = sptes | mask;
+        targetSpte = sptep;
+
+        // kvm_flush_remote_tlbs(vcpu->kvm);
+        // kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+        
+        printk("%s: bevore update: spte: %llx update spte %llx\n",__func__, *sptep, sptes);
+        if(mmu_spte_update(sptep, sptes))
+        	printk("need to flush tlb\n");
+		// if(spte_write_protect(vcpu->kvm, sptep, true))
+  //       	printk("need to flush tlb\n");
+        spin_unlock(&vcpu->kvm->mmu_lock);
+
+        kvm_flush_remote_tlbs(vcpu->kvm);
+        kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+
+        printk("%s: done updating: level %d spte: %llx update spte %llx\n",__func__, level, *sptep, sptes);
+
+
+   /*     sptes[0] = sptes[0] & localMask;
+   systemd-journald[337]: Vacuuming done, freed 4.7M of archived journals on disk.
+        sptes[0] = sptes[0] | mask ;
+        //__set_spte(sptep[0], sptes[0]);
+        //mmu_spte_set(sptep[0], sptes[0]);
+        //update_spte(sptep[0], sptes[0]);
+
+        sptes[4-nr_sptes] = sptes[4-nr_sptes] & localMask;
+        sptes[4-nr_sptes] = sptes[4-nr_sptes] | mask ;
+        //__set_spte(sptep[4-nr_sptes], sptes[4-nr_sptes]);
+        mmu_spte_update(sptep[4-nr_sptes], sptes[4-nr_sptes]);
+        //update_spte(sptep[4-nr_sptes], sptes[4-nr_sptes]);
+
+		sptes[2] = sptes[2] & localMask;
+        sptes[2] = sptes[2] | mask ;
+        //__set_spte(sptep[2], sptes[2]);
+        //mmu_spte_update(sptep[2], sptes[2]);
+
+        sptes[3] = sptes[3] & localMask;
+        sptes[3] = sptes[3] | mask ;
+        //__set_spte(sptep[3], sptes[3]);
+         // mmu_spte_update(sptep[3], sptes[3]);
+        //update_spte(sptep[3], sptes[3]);
+*/
+        return sptep;
+}
+
+void remap_to4k(u64* page, u64 spte ) {
+	int i;
+	for(i = 0; i<512; i++) {
+		page[i] = (spte + i) << 12;
+		page[i] |= 0xc77;
+	}
+}
+void free_4k_pagetable() {
+	if(new4kPageTable)
+		kfree(new4kPageTable);
+}
+
+bool list_epts(struct kvm_vcpu *vcpu, u64 addr) {
+	//printk("%s: in list_epts\n",__func__);
+    struct kvm_shadow_walk_iterator iterator;
+	for_each_shadow_entry(vcpu, addr , iterator) {
+        		// sptes = *iterator.sptep;
+          //       sptep = iterator.sptep;
+          //       level = iterator.level;
+              //  printk("%s: found Violation iterator level: %d spte: %llx\n",__func__,iterator.level, *iterator.sptep);
+                if(iterator.sptep == targetSpte){
+                	//printk("%s: found violation on our page %llx\n",__func__,*iterator.sptep);
+                	return true;
+                }
+                // nr_sptes++;
+        }
+        return false;
+}
+EXPORT_SYMBOL_GPL(list_epts);
+
+void hide_page(struct kvm_vcpu* vcpu, unsigned long a0) {
+	struct kvm_mmu_page *sp;
+	struct kvm_rmap_head rmap_head;
+	struct rmap_iterator iter;
+    spin_lock(&vcpu->kvm->mmu_lock);
+	sp = kvm_mmu_get_page(vcpu, vcpu->arch.mmu.get_cr3(vcpu) >> PAGE_SHIFT, a0, PT64_ROOT_LEVEL,vcpu->arch.mmu.direct_map, ACC_ALL);
+	//for_each_rmap_spte( rmap_head, iter, gfn_to_rmap(sp->gfn));
+	//rmap_write_protect(vcpu, sp->gfn);
+	//sp->role.access = 0;
+    kvm_flush_remote_tlbs(vcpu->kvm);
+    spin_unlock(&vcpu->kvm->mmu_lock);
+
+ 	//sp->role.access = 7;
 }

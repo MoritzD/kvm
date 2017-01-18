@@ -6144,6 +6144,20 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	/* ept page table is present? */
 	error_code |= (exit_qualification & 0x38) != 0;
 
+	printk("%s read fault: %x (mask: %x), write fault: %x (mask: %x), fetch fault: %x (mask: %x)",__func__, (exit_qualification << 2) & PFERR_USER_MASK, PFERR_USER_MASK , exit_qualification & PFERR_WRITE_MASK, PFERR_WRITE_MASK, (exit_qualification << 2) & PFERR_FETCH_MASK, PFERR_FETCH_MASK);
+
+	// if(toHideGpa){
+	// 	printk(KERN_INFO "%s: Debug test: toHideGpa: %llx Violation GPA: %llx\n",__func__, toHideGpa, gpa);
+	// }
+
+	// if(gpa == toHideGpa) {	// write violation
+	// 	printk(KERN_INFO "%s: This is the Violation you where searching for... %llx; toHideGpa: %llx\n",__func__, gpa, toHideGpa);
+	// 	if(exit_qualification & PFERR_WRITE_MASK)
+	// 		printk(KERN_INFO "%s: it is a Write fault\n",__func__);
+	// 	if((exit_qualification << 2) & PFERR_USER_MASK)
+	// 		printk(KERN_INFO "%s: it is a Read fault\n",__func__);
+	// }
+	
 	vcpu->arch.exit_qualification = exit_qualification;
 
 	return kvm_mmu_page_fault(vcpu, gpa, error_code, NULL, 0);
@@ -8321,7 +8335,20 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	u32 exit_reason = vmx->exit_reason;
 	u32 vectoring_info = vmx->idt_vectoring_info;
 
+	// if(vmcs_read64(GUEST_PHYSICAL_ADDRESS) == toHideGpa) {	// write violation
+	// 	printk(KERN_INFO "%s: right at the beginning: exit by GPA: %llx; toHideGpa: %llx\n",__func__, vmcs_read64(GUEST_PHYSICAL_ADDRESS), toHideGpa);
+		
+	// }
+
 	trace_kvm_exit(exit_reason, vcpu, KVM_ISA_VMX);
+
+	// if(toHideGpa) {
+	// 	if(exit_reason == EXIT_REASON_EPT_VIOLATION)
+	// 	{
+	// 		printk(KERN_INFO "%s: vmx_handle_exit: ept_violation at: GPA: %llx; toHideGpa: %llx\n",__func__, vmcs_read64(GUEST_PHYSICAL_ADDRESS), toHideGpa);
+	// 		list_epts(vcpu, vmcs_read64(GUEST_PHYSICAL_ADDRESS));
+	// 	}
+	// }
 
 	/*
 	 * Flush logged GPAs PML buffer, this will make dirty_bitmap more

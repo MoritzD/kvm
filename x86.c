@@ -18,6 +18,11 @@
  * the COPYING file in the top-level directory.
  *
  */
+#define KVM_HIDE_PAGE 88
+#define ACC_EXEC_MASK    1
+#define ACC_WRITE_MASK   PT_WRITABLE_MASK
+#define ACC_USER_MASK    PT_USER_MASK
+#define ACC_ALL          (ACC_EXEC_MASK | ACC_WRITE_MASK | ACC_USER_MASK)
 
 #include <linux/kvm_host.h>
 #include "irq.h"
@@ -98,6 +103,12 @@ static void update_cr8_intercept(struct kvm_vcpu *vcpu);
 static void process_nmi(struct kvm_vcpu *vcpu);
 static void enter_smm(struct kvm_vcpu *vcpu);
 static void __kvm_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags);
+
+gpa_t toHideGpa = 0;
+EXPORT_SYMBOL_GPL(toHideGpa);
+unsigned long replacePage = 0;
+EXPORT_SYMBOL_GPL(replacePage);
+u64* replacePagePointer = 0;
 
 struct kvm_x86_ops *kvm_x86_ops __read_mostly;
 EXPORT_SYMBOL_GPL(kvm_x86_ops);
@@ -5838,6 +5849,12 @@ static struct notifier_block pvclock_gtod_notifier = {
 
 int kvm_arch_init(void *opaque)
 {
+	printk("%s in init x86\n", __func__);
+
+	toHideGpa = 0;
+	replacePage = 0;
+	replacePagePointer = 0;
+
 	int r;
 	struct kvm_x86_ops *ops = opaque;
 
@@ -5960,6 +5977,10 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 {
 	unsigned long nr, a0, a1, a2, a3, ret;
 	int op_64_bit, r = 1;
+	gpa_t localGpa;
+	//gfn_t localGfn;
+	//bool hl_result;
+	
 
 	kvm_x86_ops->skip_emulated_instruction(vcpu);
 
@@ -5997,7 +6018,83 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		ret = 0;
 		break;
 	case KVM_HC_COUSTOM:
-		printk("KVM: Coustom Hypercall was called\n");
+		printk("KVM: Coustom Hypercall was called message: %lx\n",a0);
+		break;
+	case KVM_HIDE_PAGE:
+		printk(KERN_INFO "%s: KVM: In Hide_Page\n",__func__);
+
+
+		//struct kvm_mmu_page *sp;
+		//hide_page(vcpu, a0);
+ 		//sp = kvm_mmu_get_page(vcpu, vcpu->arch.mmu.get_cr3(vcpu) >> PAGE_SHIFT, a0, PT32_ROOT_LEVEL,vcpu->arch.mmu.direct_map, ACC_ALL);
+ 		//sp->role.access = 0;
+ 	/*	localGpa = kvm_mmu_gva_to_gpa_write(vcpu, a0, &localEx);
+         localGfn = gpa_to_gfn(localGpa);
+
+         spin_lock(&vcpu->kvm->mmu_lock);
+         hl_result = rmap_write_protect(vcpu->kvm, localGfn);
+         printk("local gfn is %llx , result of kvm_age_hva is
+		%d\n", localGfn, hl_result);
+         kvm_flush_remote_tlbs(vcpu->kvm);
+         spin_unlock(&vcpu->kvm->mmu_lock);
+
+         hl_result = kvm_mmu_get_spte_hierarchy(vcpu, localGpa,
+	hl_sptes);
+         printk("return result is %d , gpa: %llx sptes: %llx ,
+	 %llx , %llx , %llx \n", hl_result, localGpa, hl_sptes[0], hl_sptes[1],
+		 hl_sptes[2], hl_sptes[3]);
+
+*/
+
+					// conversion from gva to gpa
+
+/*                 localGpa = kvm_mmu_gva_to_gpa_write(vcpu, a0, NULL);
+                 if(localGpa == UNMAPPED_GVA){
+                         printk("write is not correct\n");
+                 		 localGpa = kvm_mmu_gva_to_gpa_system(vcpu, a0, NULL);
+                 		 if(localGpa == UNMAPPED_GVA){
+                         	printk("system is not correct\n");
+                         	localGpa = kvm_mmu_gva_to_gpa_read(vcpu, a0, NULL);
+                         	if(localGpa == UNMAPPED_GVA){
+	                         	printk("read is not correct %llx\n",localGpa);
+	                         	return -KVM_ENOSYS;
+	                         }
+                         }
+                 }
+*/               localGpa = a0;  
+				printk(KERN_INFO "%s: got address %llx\n",__func__,localGpa);
+                toHideGpa = localGpa&0xFFFFFFFFFFFFF000;
+                printk(KERN_INFO "%s: toHideGpa: %llx\n",__func__,toHideGpa);
+                replacePagePointer = __get_free_page(GFP_KERNEL);
+                int* testp = (int*)replacePagePointer;
+                testp[0] = 0;
+                testp[1] = 1;
+                testp[2] = 2;
+                testp[3] = 3;
+                testp[4] = 4;
+                testp[5] = 5;
+                testp[6] = 6;
+                testp[7] = 7;
+                testp[8] = 8;
+                testp[9] = 9;
+                testp[10] = 10;
+                replacePage = virt_to_phys(replacePagePointer);
+                printk(KERN_INFO "%s: new page (for r/w access) adress: %llx\n",__func__, replacePage);
+                 
+                printk(KERN_INFO "%s: res: %llx\n",__func__,*hl_kvm_mmu_update_spte(vcpu, localGpa, 4)); //5
+                 
+
+               
+
+                 //hl_result = kvm_mmu_get_spte_hierarchy(vcpu, localGpa, hl_sptes);
+
+                 //printk("after changes return result is %d , gpa: %llx sptes: %llx , %llx , %llx , %llx \n", hl_result, localGpa,
+ //hl_sptes[0], hl_sptes[1], hl_sptes[2], hl_sptes[3]);
+                // kvm_flush_remote_tlbs(vcpu->kvm);
+
+                 
+        
+ 		printk(KERN_INFO "%s: KVM: Set access\n",__func__);
 		break;
 	default:
 		ret = -KVM_ENOSYS;
@@ -8111,6 +8208,10 @@ void kvm_arch_commit_memory_region(struct kvm *kvm,
 
 void kvm_arch_flush_shadow_all(struct kvm *kvm)
 {
+	// TODO: CLEANUP MY PAGE
+	if(replacePagePointer)
+		kfree(replacePagePointer);
+	free_4k_pagetable();
 	kvm_mmu_invalidate_zap_all_pages(kvm);
 }
 

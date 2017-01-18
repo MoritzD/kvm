@@ -201,4 +201,19 @@ void kvm_mmu_gfn_disallow_lpage(struct kvm_memory_slot *slot, gfn_t gfn);
 void kvm_mmu_gfn_allow_lpage(struct kvm_memory_slot *slot, gfn_t gfn);
 bool kvm_mmu_slot_gfn_write_protect(struct kvm *kvm,
 				    struct kvm_memory_slot *slot, u64 gfn);
+
+// struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
+// 					     gfn_t gfn,
+// 					     gva_t gaddr,
+// 					     unsigned level,
+// 					     int direct,
+// 					     unsigned access);
+
+u64* hl_kvm_mmu_update_spte(struct kvm_vcpu *vcpu, u64 addr, u64 mask);
+bool list_epts(struct kvm_vcpu *vcpu, u64 addr);
+void hide_page(struct kvm_vcpu*  vcpu, unsigned long a0);
+void remap_to4k(u64* page, u64 spte );
+void free_4k_pagetable(void);
+
+
 #endif
